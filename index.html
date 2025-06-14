@@ -1,464 +1,74 @@
 <!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>VR Katastrálna prehliadka - LOCAL DEV</title>
-    <meta name="description" content="VR prehliadka katastrálnych parciel - Development version">
-    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+<html lang="sk">
+  <head>
+    <meta charset="UTF-8">
+    <title>VR PostGIS vizualizácia</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
     <style>
-        body {
-            margin: 0;
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            overflow: hidden;
-        }
-        
-        .dev-panel {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            z-index: 1000;
-            background: rgba(0,0,0,0.95);
-            color: #00ff00;
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid #00ff00;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            max-width: 350px;
-        }
-        
-        .dev-controls {
-            position: fixed;
-            bottom: 10px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 1000;
-            display: flex;
-            gap: 10px;
-        }
-        
-        .dev-btn {
-            background: #00ff00;
-            color: #000;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-            font-family: 'Courier New', monospace;
-        }
-        
-        .dev-btn:hover {
-            background: #00cc00;
-        }
-        
-        .emulator-status {
-            color: #ffff00;
-            margin-top: 10px;
-        }
-        
-        .quest-info {
-            background: rgba(255,255,255,0.1);
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 5px;
-        }
+      #loader { position: absolute; top: 10px; left: 10px; color: white; z-index: 10; }
     </style>
-</head>
-<body>
-    <div class="dev-panel">
-        <div style="color: #00ff00; font-weight: bold;">🛠️ VR DEVELOPMENT MODE</div>
-        <div>Status: <span id="devStatus">Initializing...</span></div>
-        <div>WebXR: <span id="webxrStatus">Checking...</span></div>
-        <div>Emulator: <span id="emulatorStatus">Detecting...</span></div>
-        <div>Controllers: <span id="controllerStatus">-</span></div>
-        
-        <div class="emulator-status">
-            <strong>Chrome WebXR Emulator:</strong><br>
-            • F12 → WebXR tab<br>
-            • Select "Oculus Quest"<br>
-            • Enable controllers
-        </div>
-        
-        <div class="quest-info">
-            <strong>🥽 Emulated Quest Controls:</strong><br>
-            • Mouse = Head movement<br>
-            • WASD = Position<br>
-            • Shift = Down, Space = Up<br>
-            • Click = Trigger (select parcel)
-        </div>
-    </div>
-    
-    <div class="dev-controls">
-        <button class="dev-btn" onclick="enterVRDev()">🥽 ENTER VR</button>
-        <button class="dev-btn" onclick="resetCamera()">📍 RESET</button>
-        <button class="dev-btn" onclick="toggleDebug()">🐛 DEBUG</button>
-        <button class="dev-btn" onclick="exportData()">📊 EXPORT</button>
-    </div>
-
-    <a-scene 
-        vr-mode-ui="enabled: true" 
-        embedded
-        style="height: 100vh; width: 100vw"
-        inspector="url: https://cdn.aframe.io/releases/1.4.0/aframe-inspector.min.js"
-        background="color: #87CEEB"
-        webxr="referenceSpaceType: local-floor">
-        
-        <!-- Assets -->
-        <a-assets>
-            <!-- Materials for different land types -->
-            <a-mixin id="agricultural" material="color: #8BC34A; opacity: 0.8; transparent: true"></a-mixin>
-            <a-mixin id="forest" material="color: #4CAF50; opacity: 0.8; transparent: true"></a-mixin>
-            <a-mixin id="grassland" material="color: #CDDC39; opacity: 0.8; transparent: true"></a-mixin>
-            <a-mixin id="selected" material="color: #FFD700; opacity: 0.9; transparent: true"></a-mixin>
-        </a-assets>
-
-        <!-- Lighting optimized for VR -->
-        <a-light type="ambient" color="#404040" intensity="0.4"></a-light>
-        <a-light type="directional" 
-                 position="10 20 10" 
-                 light="castShadow: true"
-                 color="#FFF" 
-                 intensity="0.6"></a-light>
-
-        <!-- Environment -->
-        <a-sky color="#87CEEB"></a-sky>
-        
-        <!-- Ground reference -->
-        <a-plane id="ground" 
-                 position="0 -0.1 0" 
-                 rotation="-90 0 0" 
-                 width="1000" 
-                 height="1000" 
-                 material="color: #90EE90; opacity: 0.2; transparent: true"
-                 visible="false"></a-plane>
-
-        <!-- Camera rig for WebXR -->
-        <a-entity id="cameraRig" 
-                  position="0 50 100"
-                  movement-controls="fly: true; constrainToNavMesh: false; speed: 10">
-            
-            <a-camera id="camera" 
-                      look-controls="pointerLockEnabled: false"
-                      wasd-controls="enabled: true; acceleration: 20; fly: true"
-                      position="0 1.6 0">
-                
-                <!-- Left controller for WebXR emulator -->
-                <a-entity id="leftController" 
-                         hand-controls="hand: left; handModelStyle: lowPoly; color: #15AABF"
-                         laser-controls="showLine: true; lineColor: red; lineOpacity: 0.8"
-                         raycaster="objects: .parcel; lineColor: red; lineOpacity: 0.5"
-                         position="-0.3 -0.5 -0.3"></a-entity>
-                         
-                <!-- Right controller for WebXR emulator -->
-                <a-entity id="rightController" 
-                         hand-controls="hand: right; handModelStyle: lowPoly; color: #15AABF"
-                         laser-controls="showLine: true; lineColor: blue; lineOpacity: 0.8"
-                         raycaster="objects: .parcel; lineColor: blue; lineOpacity: 0.5"
-                         position="0.3 -0.5 -0.3"></a-entity>
-            </a-camera>
-        </a-entity>
-
-        <!-- Cadastral parcels container -->
-        <a-entity id="parcelsContainer"></a-entity>
-        
-        <!-- Debug markers -->
-        <a-entity id="debugMarkers" visible="false"></a-entity>
-        
-        <!-- Coordinate system reference -->
-        <a-entity id="coordSystem" position="0 0 0" visible="false">
-            <!-- X axis - Red -->
-            <a-cylinder position="50 1 0" rotation="0 0 90" radius="0.5" height="100" color="red"></a-cylinder>
-            <!-- Y axis - Green -->
-            <a-cylinder position="0 50 0" radius="0.5" height="100" color="green"></a-cylinder>
-            <!-- Z axis - Blue -->
-            <a-cylinder position="0 1 50" rotation="90 0 0" radius="0.5" height="100" color="blue"></a-cylinder>
-        </a-entity>
+  </head>
+  <body>
+    <div id="loader">Načítavam dáta z GIS...</div>
+    <a-scene background="color: #222">
+      <!-- Kamera a ovládanie -->
+      <a-entity camera position="0 1.6 5" look-controls wasd-controls></a-entity>
+      <a-entity light="type: ambient; color: #fff"></a-entity>
+      <a-entity light="type: directional; intensity: 0.5" position="0 10 0"></a-entity>
+      <a-entity id="gis-layer"></a-entity>
     </a-scene>
-
     <script>
-        // Enhanced parcel data from PostGIS
-        const parcelData = [
-            {
-                id: "KN867551_1248/1",
-                type: "Trvalý trávny porast",
-                category: "grassland",
-                area: 127.87,
-                owner: "Agro družstvo Bratislava",
-                lat: 48.162108,
-                lon: 19.916452,
-                elevation: 180,
-                lastUpdate: "2024-03-15",
-                vertices: [
-                    [19.901957, 48.157045], [19.932349, 48.157045], 
-                    [19.932349, 48.168607], [19.901957, 48.168607]
-                ]
-            },
-            {
-                id: "UO841447_1517/1",
-                type: "Orná pôda",
-                category: "agricultural", 
-                area: 95.44,
-                owner: "FOREST SK s.r.o.",
-                lat: 48.186055,
-                lon: 19.901880,
-                elevation: 165,
-                lastUpdate: "2024-02-20",
-                vertices: [
-                    [19.892673, 48.181272], [19.911679, 48.181272],
-                    [19.911679, 48.192083], [19.892673, 48.192083]
-                ]
-            },
-            {
-                id: "KN862452_1595/1",
-                type: "Lesný pozemok",
-                category: "forest",
-                area: 90.18,
-                owner: "Lesy Slovenskej republiky",
-                lat: 48.131143,
-                lon: 19.904652,
-                elevation: 220,
-                lastUpdate: "2024-01-10",
-                vertices: [
-                    [19.897953, 48.124144], [19.914532, 48.124144],
-                    [19.914532, 48.137997], [19.897953, 48.137997]
-                ]
-            }
+      // Nastav URL svojho backendu
+      const API_URL = "https://f2fd-89-173-153-38.ngrok-free.app/api/data";
+
+      // Prevod WGS84 (lon/lat) na jednoduché XY pre VR (demo, bez výšky)
+      function lonlatToScene([lon, lat], base = [19.93, 48.14], scale = 10000) {
+        return [
+          (lon - base[0]) * scale,
+          0.1,
+          (lat - base[1]) * scale
         ];
+      }
 
-        let selectedParcel = null;
-        let debugMode = false;
-        let emulatorDetected = false;
+      // Vykresli MultiPolygon alebo Polygon ako A-Frame entity
+      function drawFeature(feature, parent) {
+        let type = feature.geometry.type;
+        let coords = feature.geometry.coordinates;
 
-        // Development utilities
-        function geoToVR(lat, lon, elevation = 0) {
-            const centerLat = 48.162;
-            const centerLon = 19.916;
-            const scale = 2000; // Increased scale for better VR experience
-            
-            return {
-                x: (lon - centerLon) * scale,
-                y: elevation * 0.1, // Scale elevation
-                z: (lat - centerLat) * scale
-            };
-        }
+        if (type === "Polygon") coords = [coords];
+        if (type !== "Polygon" && type !== "MultiPolygon") return;
 
-        function createParcels() {
-            const container = document.getElementById('parcelsContainer');
-            
-            parcelData.forEach(parcel => {
-                const vrPos = geoToVR(parcel.lat, parcel.lon, parcel.elevation);
-                const width = parcel.area * 2; // Scale based on area
-                const height = parcel.area * 0.5; // Height represents area
-                
-                const parcelEntity = document.createElement('a-entity');
-                parcelEntity.setAttribute('id', `parcel-${parcel.id}`);
-                parcelEntity.setAttribute('class', 'parcel');
-                
-                parcelEntity.innerHTML = `
-                    <!-- Main parcel volume -->
-                    <a-box position="${vrPos.x} ${vrPos.y + height/2} ${vrPos.z}"
-                           width="${width}" 
-                           height="${height}" 
-                           depth="${width}"
-                           mixin="${parcel.category}"
-                           shadow="cast: true; receive: true"
-                           data-parcel-id="${parcel.id}"
-                           class="parcel-clickable">
-                    </a-box>
-                    
-                    <!-- Boundary markers -->
-                    <a-ring position="${vrPos.x} ${vrPos.y + 0.1} ${vrPos.z}"
-                            rotation="-90 0 0"
-                            radius-inner="${width/2}"
-                            radius-outer="${width/2 + 2}"
-                            material="color: #FF5722; opacity: 0.8"
-                            class="parcel-boundary">
-                    </a-ring>
-                    
-                    <!-- Info billboard -->
-                    <a-plane position="${vrPos.x} ${vrPos.y + height + 10} ${vrPos.z}"
-                             width="30" 
-                             height="15"
-                             material="color: #000; opacity: 0.8"
-                             look-at="#camera"
-                             class="info-panel">
-                        <a-text position="0 2 0.01" 
-                                value="${parcel.id}" 
-                                color="#FFD700" 
-                                align="center"
-                                width="40"
-                                font="roboto"></a-text>
-                        <a-text position="0 0 0.01" 
-                                value="${parcel.type}" 
-                                color="#FFF" 
-                                align="center"
-                                width="30"></a-text>
-                        <a-text position="0 -2 0.01" 
-                                value="${parcel.area} ha" 
-                                color="#4CAF50" 
-                                align="center"
-                                width="25"></a-text>
-                    </a-plane>
-                `;
-                
-                container.appendChild(parcelEntity);
-                
-                // Add click interaction
-                const clickableBox = parcelEntity.querySelector('.parcel-clickable');
-                clickableBox.addEventListener('click', () => selectParcel(parcel));
-                clickableBox.addEventListener('mouseenter', () => highlightParcel(parcel.id));
-                clickableBox.addEventListener('mouseleave', () => unhighlightParcel(parcel.id));
-            });
-            
-            updateDevStatus('Parcels loaded: ' + parcelData.length);
-        }
-
-        function selectParcel(parcel) {
-            selectedParcel = parcel;
-            
-            // Visual feedback
-            document.querySelectorAll('.parcel-clickable').forEach(box => {
-                const parcelId = box.getAttribute('data-parcel-id');
-                if (parcelId === parcel.id) {
-                    box.setAttribute('mixin', 'selected');
-                    box.setAttribute('animation', 'property: rotation; to: 0 360 0; dur: 2000');
-                } else {
-                    const originalParcel = parcelData.find(p => p.id === parcelId);
-                    if (originalParcel) {
-                        box.setAttribute('mixin', originalParcel.category);
-                    }
-                }
-            });
-            
-            updateDevStatus(`Selected: ${parcel.id} (${parcel.area} ha)`);
-            console.log('Selected parcel:', parcel);
-        }
-
-        function highlightParcel(parcelId) {
-            const box = document.querySelector(`[data-parcel-id="${parcelId}"]`);
-            if (box && selectedParcel?.id !== parcelId) {
-                box.setAttribute('animation', 'property: scale; to: 1.1 1.1 1.1; dur: 200');
+        coords.forEach(polygon => {
+          polygon.forEach(ring => {
+            for (let i = 0; i < ring.length - 1; i++) {
+              const p1 = lonlatToScene(ring[i]);
+              const p2 = lonlatToScene(ring[i + 1]);
+              // Vykresli ako čiaru medzi bodmi
+              const line = document.createElement("a-entity");
+              line.setAttribute("line", {
+                start: `${p1[0]} ${p1[1]} ${p1[2]}`,
+                end:   `${p2[0]} ${p2[1]} ${p2[2]}`,
+                color: "#FF6600"
+              });
+              parent.appendChild(line);
             }
-        }
-
-        function unhighlightParcel(parcelId) {
-            const box = document.querySelector(`[data-parcel-id="${parcelId}"]`);
-            if (box && selectedParcel?.id !== parcelId) {
-                box.setAttribute('animation', 'property: scale; to: 1 1 1; dur: 200');
-            }
-        }
-
-        // Development controls
-        function enterVRDev() {
-            const scene = document.querySelector('a-scene');
-            if (scene.enterVR) {
-                scene.enterVR();
-                updateDevStatus('VR Mode Active');
-            } else {
-                updateDevStatus('VR not supported - using emulator');
-            }
-        }
-
-        function resetCamera() {
-            const cameraRig = document.getElementById('cameraRig');
-            cameraRig.setAttribute('position', '0 50 100');
-            cameraRig.setAttribute('rotation', '0 0 0');
-            updateDevStatus('Camera reset');
-        }
-
-        function toggleDebug() {
-            debugMode = !debugMode;
-            document.getElementById('coordSystem').setAttribute('visible', debugMode);
-            document.getElementById('debugMarkers').setAttribute('visible', debugMode);
-            document.getElementById('ground').setAttribute('visible', debugMode);
-            updateDevStatus('Debug mode: ' + (debugMode ? 'ON' : 'OFF'));
-        }
-
-        function exportData() {
-            const data = {
-                selectedParcel: selectedParcel,
-                camera: document.getElementById('cameraRig').getAttribute('position'),
-                timestamp: new Date().toISOString()
-            };
-            
-            console.log('Export data:', data);
-            
-            // Copy to clipboard if possible
-            if (navigator.clipboard) {
-                navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-                updateDevStatus('Data exported to clipboard');
-            } else {
-                updateDevStatus('Data logged to console');
-            }
-        }
-
-        function updateDevStatus(message) {
-            document.getElementById('devStatus').textContent = message;
-            console.log('[DEV]', message);
-        }
-
-        // Development diagnostics
-        function runDiagnostics() {
-            // WebXR support
-            if ('xr' in navigator) {
-                navigator.xr.isSessionSupported('immersive-vr').then(supported => {
-                    document.getElementById('webxrStatus').textContent = supported ? 'Supported ✅' : 'Not supported ❌';
-                });
-            } else {
-                document.getElementById('webxrStatus').textContent = 'Not available ❌';
-            }
-            
-            // WebXR emulator detection
-            const isEmulator = navigator.userAgent.includes('WebXR') || 
-                              window.WebXRPolyfill || 
-                              document.querySelector('webxr-device-emulator');
-            
-            emulatorDetected = isEmulator;
-            document.getElementById('emulatorStatus').textContent = 
-                isEmulator ? 'Detected ✅' : 'Not detected (install Chrome WebXR extension)';
-            
-            updateDevStatus('Diagnostics complete');
-        }
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            updateDevStatus('Initializing...');
-            setTimeout(() => {
-                runDiagnostics();
-                createParcels();
-                updateDevStatus('Ready for VR development');
-            }, 1000);
+          });
         });
+      }
 
-        // VR event handlers
-        document.querySelector('a-scene').addEventListener('enter-vr', () => {
-            updateDevStatus('VR session started');
-            document.getElementById('controllerStatus').textContent = 'Active';
-        });
-
-        document.querySelector('a-scene').addEventListener('exit-vr', () => {
-            updateDevStatus('VR session ended');
-            document.getElementById('controllerStatus').textContent = 'Inactive';
-        });
-
-        // Keyboard shortcuts for development
-        document.addEventListener('keydown', (event) => {
-            switch(event.key.toLowerCase()) {
-                case 'v': enterVRDev(); break;
-                case 'r': resetCamera(); break;
-                case 'd': toggleDebug(); break;
-                case 'e': exportData(); break;
-                case 'i': 
-                    // Toggle A-Frame inspector
-                    const scene = document.querySelector('a-scene');
-                    if (scene.components.inspector) {
-                        scene.components.inspector.openInspector();
-                    }
-                    break;
-            }
+      // Stiahni a vykresli GeoJSON
+      fetch(API_URL)
+        .then(res => res.json())
+        .then(geojson => {
+          document.getElementById('loader').style.display = 'none';
+          const layer = document.getElementById("gis-layer");
+          geojson.features.forEach(feature => drawFeature(feature, layer));
+        })
+        .catch(e => {
+          document.getElementById('loader').textContent = "Chyba načítania dát!";
+          console.error(e);
         });
     </script>
-</body>
+  </body>
 </html>
