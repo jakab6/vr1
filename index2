@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="sk">
+  <head>
+    <meta charset="UTF-8">
+    <title>VR PostGIS vizualizácia</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <style>
+      #loader { position: absolute; top: 10px; left: 10px; color: white; z-index: 10; }
+    </style>
+  </head>
+  <body>
+    <div id="loader">Načítavam dáta z GIS...</div>
+    <a-scene background="color: #222">
+      <!-- Kamera a ovládanie -->
+      <a-entity camera position="0 1.6 5" look-controls wasd-controls></a-entity>
+      <a-entity light="type: ambient; color: #fff"></a-entity>
+      <a-entity light="type: directional; intensity: 0.5" position="0 10 0"></a-entity>
+      <a-entity id="gis-layer"></a-entity>
+    </a-scene>
+    <script>
+      // Nastav URL svojho backendu
+      const API_URL = "https://papa.ngrok.dev/api/data";
+
+      // Prevod WGS84 (lon/lat) na jednoduché XY pre VR (demo, bez výšky)
+      function lonlatToScene([lon, lat], base = [19.93, 48.14], scale = 10000) {
+        return [
+          (lon - base[0]) * scale,
+          0.1,
+          (lat - base[1]) * scale
+        ];
+      }
+
+      // Vykresli MultiPolygon alebo Polygon ako A-Frame entity
+      function drawFeature(feature, parent) {
+        let type = feature.geometry.type;
+        let coords = feature.geometry.coordinates;
+
+        if (type === "Polygon") coords = [coords];
+        if (type !== "Polygon" && type !== "MultiPolygon") return;
+
+        coords.forEach(polygon => {
+          polygon.forEach(ring => {
+            for (let i = 0; i < ring.length - 1; i++) {
+              const p1 = lonlatToScene(ring[i]);
+              const p2 = lonlatToScene(ring[i + 1]);
+              // Vykresli ako čiaru medzi bodmi
+              const line = document.createElement("a-entity");
+              line.setAttribute("line", {
+                start: `${p1[0]} ${p1[1]} ${p1[2]}`,
+                end:   `${p2[0]} ${p2[1]} ${p2[2]}`,
+                color: "#FF6600"
+              });
+              parent.appendChild(line);
+            }
+          });
+        });
+      }
+
+      // Stiahni a vykresli GeoJSON
+      fetch(API_URL)
+        .then(res => res.json())
+        .then(geojson => {
+          document.getElementById('loader').style.display = 'none';
+          const layer = document.getElementById("gis-layer");
+          geojson.features.forEach(feature => drawFeature(feature, layer));
+        })
+        .catch(e => {
+          document.getElementById('loader').textContent = "Chyba načítania dát!";
+          console.error(e);
+        });
+    </script>
+  </body>
+</html>
