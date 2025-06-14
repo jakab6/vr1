@@ -7,22 +7,25 @@
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
     <style>
       #loader { position: absolute; top: 10px; left: 10px; color: white; z-index: 10; }
+      #apiurlbox { position: absolute; top: 40px; left: 10px; z-index: 10; background: #222; color: white; padding: 6px; border-radius: 6px; }
+      #apiurlbox input { width: 300px; }
+      #apiurlbox button { margin-left: 10px; }
     </style>
   </head>
   <body>
     <div id="loader">Načítavam dáta z GIS...</div>
-    <a-scene background="color: #222">
-      <!-- Kamera a ovládanie -->
-      <a-entity camera position="0 1.6 5" look-controls wasd-controls></a-entity>
-      <a-entity light="type: ambient; color: #fff"></a-entity>
-      <a-entity light="type: directional; intensity: 0.5" position="0 10 0"></a-entity>
+    <div id="apiurlbox">
+      API URL: 
+      <input type="text" id="apiurl" value="TU_DOPLŇ_SVOJU_API_URL">
+      <button onclick="reloadData()">Načítať</button>
+    </div>
+    <a-scene background="color: #181b1e">
+      <a-entity camera position="0 2.4 12" look-controls wasd-controls></a-entity>
+      <a-entity light="type: ambient; intensity: 1; color: #fff"></a-entity>
+      <a-entity light="type: directional; intensity: 0.7" position="0 10 5"></a-entity>
       <a-entity id="gis-layer"></a-entity>
     </a-scene>
     <script>
-      // Nastav URL svojho backendu
-      const API_URL = "https://papa.ngrok.dev/api/data";
-
-      // Prevod WGS84 (lon/lat) na jednoduché XY pre VR (demo, bez výšky)
       function lonlatToScene([lon, lat], base = [19.93, 48.14], scale = 10000) {
         return [
           (lon - base[0]) * scale,
@@ -31,44 +34,72 @@
         ];
       }
 
-      // Vykresli MultiPolygon alebo Polygon ako A-Frame entity
+      // Vyber náhodnú farbu pre každý polygon
+      function randomColor() {
+        const colors = ["#FF6600", "#00BFFF", "#39FF14", "#FFD700", "#FF00FF", "#FF4444", "#00FFB2"];
+        return colors[Math.floor(Math.random()*colors.length)];
+      }
+
       function drawFeature(feature, parent) {
         let type = feature.geometry.type;
         let coords = feature.geometry.coordinates;
-
         if (type === "Polygon") coords = [coords];
         if (type !== "Polygon" && type !== "MultiPolygon") return;
 
+        // Iná farba pre každú feature
+        const color = randomColor();
+
         coords.forEach(polygon => {
-          polygon.forEach(ring => {
+          polygon.forEach((ring, idx) => {
+            // Polygónová línia
             for (let i = 0; i < ring.length - 1; i++) {
               const p1 = lonlatToScene(ring[i]);
               const p2 = lonlatToScene(ring[i + 1]);
-              // Vykresli ako čiaru medzi bodmi
+              // Hrubšia čiara, jasná farba
               const line = document.createElement("a-entity");
               line.setAttribute("line", {
                 start: `${p1[0]} ${p1[1]} ${p1[2]}`,
                 end:   `${p2[0]} ${p2[1]} ${p2[2]}`,
-                color: "#FF6600"
+                color: color
               });
+              line.setAttribute("line__material", "linewidth: 6");
               parent.appendChild(line);
+
+              // Bod (vertex)
+              const sphere = document.createElement("a-sphere");
+              sphere.setAttribute("radius", 0.15);
+              sphere.setAttribute("color", idx === 0 ? "#fff" : "#888");
+              sphere.setAttribute("position", `${p1[0]} ${p1[1]} ${p1[2]}`);
+              sphere.setAttribute("opacity", 0.8);
+              parent.appendChild(sphere);
             }
           });
         });
       }
 
-      // Stiahni a vykresli GeoJSON
-      fetch(API_URL)
-        .then(res => res.json())
-        .then(geojson => {
-          document.getElementById('loader').style.display = 'none';
-          const layer = document.getElementById("gis-layer");
-          geojson.features.forEach(feature => drawFeature(feature, layer));
-        })
-        .catch(e => {
-          document.getElementById('loader').textContent = "Chyba načítania dát!";
-          console.error(e);
-        });
+      function clearLayer() {
+        const layer = document.getElementById("gis-layer");
+        while(layer.firstChild) layer.removeChild(layer.firstChild);
+      }
+
+      function reloadData() {
+        document.getElementById('loader').textContent = "Načítavam dáta z GIS...";
+        document.getElementById('loader').style.display = 'block';
+        clearLayer();
+        const API_URL = document.getElementById('apiurl').value;
+        fetch(API_URL)
+          .then(res => res.json())
+          .then(geojson => {
+            document.getElementById('loader').style.display = 'none';
+            const layer = document.getElementById("gis-layer");
+            geojson.features.forEach(feature => drawFeature(feature, layer));
+          })
+          .catch(e => {
+            document.getElementById('loader').textContent = "Chyba načítania dát!";
+            console.error(e);
+          });
+      }
+      window.onload = reloadData;
     </script>
   </body>
 </html>
